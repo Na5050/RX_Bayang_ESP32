@@ -1,0 +1,70 @@
+// в rc.ino изменить эти две функции
+
+void setupRC() {
+	Serial.println("Setup RC");
+#ifdef BNG
+  pinMode(CS_pin, OUTPUT);
+  pinMode(CE_pin, OUTPUT);
+  resetData();
+  delay(50);
+  Serial.println("Initializing stage");
+  SPIH_Begin(); 
+  NRF24L01_Reset();
+  NRF24L01_Initialize();
+  Bayang_init();
+  Bayang_bind();
+#else
+	RC.begin();
+#endif
+}
+
+void readRC() {
+#ifdef BNG
+  static uint32_t timeout = 0;
+  // process protocol
+    if (reset)
+  {
+    reset = false;
+    
+    NRF24L01_Reset();
+    NRF24L01_Initialize();
+    Bayang_init();
+    Bayang_bind();
+  }
+    if (micros() > timeout) {
+      timeout = process_Bayang(&tmp);
+      //Serial.println("aileron ");
+      //Serial.println(tmp.throttle,  DEC);
+      //Serial.println(tmp.yaw, DEC);
+      //Serial.println(tmp.pitch, DEC);
+      //
+      if (tmp.throttle==0 && tmp.yaw==0 && tmp.pitch==0 && tmp.roll==0) {
+        emptyPacketsCount++;
+        //if (emptyPacketsCount >= 160) {
+          // signal lost?
+          //resetData(); //set invalid values so that fc can enter fail safe
+          //emptyPacketsCount = 160;
+        //}
+      } else {
+        data = tmp;
+        emptyPacketsCount = 0;
+        channels[0]=data.roll;
+        channels[1]=data.pitch;
+        channels[2]=data.throttle;
+        channels[3]=data.yaw;
+		    normalizeRC();
+		    controlsTime = t;
+        //setPPMValuesFromData();
+      }
+      //Serial.println(emptyPacketsCount, DEC);
+    }
+#else
+	if (RC.read()) {
+		SBUSData data = RC.data();
+		memcpy(channels, data.ch, sizeof(channels)); // copy channels data
+		normalizeRC();
+		controlsTime = t;
+	}
+#endif
+}
+
