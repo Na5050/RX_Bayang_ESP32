@@ -11,92 +11,81 @@
 
  You should have received a copy of the GNU General Public License.
  If not, see <http://www.gnu.org/licenses/>.
-*/
 
+ 
+ Although this file is named softSPI I tried to use hardware SPI here.
+ */
+ 
+#include <SPI.h>
+#include "iface_nrf24l01.h"
 #define NOP() __asm__ __volatile__("nop")
+void  asm_delay(const uint8_t d){
+	  uint8_t dd = d;
+	  do NOP(); while(dd--);
+}
+//#define my_delay(dt)  asm_delay((dt*4.0) - 3 );
 
-void Read_Packet(uint8_t* data, uint8_t length)
+
+
+SPIClass SPIH(HSPI);
+void SPIH_Begin()
 {
-  uint8_t i;
+  SPIH.begin(SCK_pin, MISO_pin, MOSI_pin, CS_pin);
+}
 
+void trb__(){
+  SPIH.beginTransaction(SPISettings(8000000, MSBFIRST, SPI_MODE0));
+  digitalWrite(CS_pin, LOW);
+  asm_delay(10);
+  //delayMicroseconds(1);
+}
+
+void tre__(){
+  digitalWrite(CS_pin, HIGH);
+  asm_delay(10);
+  //delayMicroseconds(1);
+  SPIH.endTransaction();
+}
+
+/*uint8_t Read_Packet(uint8_t *data, uint8_t length) 
+{
+  uint8_t status;
+  uint8_t* current = reinterpret_cast<uint8_t*>(data);
   CS_off;
-  spi_write(0x61); // Read RX payload
-  
-  for (i = 0; i < length; i++)
-  {
-    data[i] = spi_read();
+  status = spi_write(R_RX_PAYLOAD);
+  while ( length-- ) {
+    *current++ = spi_read();
   }
   CS_on;
-}
+  return status;
+}*/
 
 uint8_t spi_write(uint8_t command) 
 {
-  uint8_t result = 0;
-  uint8_t n = 8;
-  
-  SCK_off;
-  MOSI_off;
-  
-  while (n--)
-  {
-    if (command & 0x80)
-    MOSI_on;
-    else
-    MOSI_off;
-    
-    if (MISO_on)
-    result = (result << 1) | 0x01;
-    else
-    result = result << 1;
-    SCK_on;
-    NOP();
-    SCK_off;
-    command = command << 1;
-  }
-  MOSI_on;
-  return result;
+    return SPIH.transfer(command);
 }
 
-void spi_write_address(uint8_t address, uint8_t data)
+/*void spi_write_address(uint8_t address, uint8_t data) 
 {
-  CS_off;
-  spi_write(address);
-  NOP();
-  spi_write(data);
-  CS_on;
-}
+    CS_off;
+    spi_write(address);
+    NOP();
+    spi_write(data);
+    CS_on;
+}*/
 
 // read one byte from MISO
 uint8_t spi_read()
 {
-  uint8_t result = 0;
-  uint8_t i;
-  
-  MOSI_off;
-  NOP();
-  
-  for (i = 0; i < 8; i++)
-  {
-    if (MISO_on) // if MISO is HIGH
-    result = (result << 1) | 0x01;
-    else
-    result = result << 1;
-    SCK_on;
-    NOP();
-    SCK_off;
-    NOP();
-  }
-  return result;
+    return SPIH.transfer(0xFF);
 }
 
-uint8_t spi_read_address(uint8_t address) 
+/*uint8_t spi_read_address(uint8_t address) 
 {
-  uint8_t result;
-  
-  CS_off;
-  spi_write(address);
-  result = spi_read();
-  CS_on;
-  return (result);
-}
- 
+    uint8_t result;
+    CS_off;
+    spi_write(address);
+    result = spi_read();
+    CS_on;
+    return(result);
+}*/
