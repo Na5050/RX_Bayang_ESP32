@@ -14,7 +14,7 @@
 */
 
 #define BAYANG_BIND_COUNT       1000
-#define BAYANG_PACKET_PERIOD    2000
+#define BAYANG_PACKET_PERIOD    1000
 #define BAYANG_PACKET_SIZE      15
 #define BAYANG_RF_NUM_CHANNELS  4
 #define BAYANG_RF_BIND_CHANNEL  0
@@ -23,15 +23,67 @@
 static uint8_t Bayang_rf_chan = 0;
 static uint8_t Bayang_rf_channels[BAYANG_RF_NUM_CHANNELS] = {0};
 static uint8_t Bayang_rx_tx_addr[BAYANG_ADDRESS_LENGTH];
+typedef struct {
+  uint16_t throttle;
+  uint16_t yaw;
+  uint16_t pitch;
+  uint16_t roll;
+  byte aux1;
+  byte aux2;
+  byte aux3;
+  byte aux4;
+  byte aux5;
+  // can add four more auxs
+} MyDataBg;
+MyDataBg data;
+MyDataBg tmp;
+
+#define BNG
+
+#define MOSI_pin  27  
+#define SCK_pin   25
+#define CE_pin    17  
+#define MISO_pin  26 
+#define CS_pin   32 
+
+#define CE_on digitalWrite(CE_pin, HIGH);
+#define CE_off digitalWrite(CE_pin, LOW);
+
+#define RF_POWER TX_POWER_5mW 
+
+//#define DEBUG
+
+uint8_t transmitterID[4];
+uint8_t packet[32];
+static bool reset = false;
+static uint8_t emptyPacketsCount = 160;
+
+
+void resetData() 
+{
+  //TODO: check safe values
+  // 'safe' values to use when no radio input is detected
+  data.throttle = 0;
+  data.yaw = 511;
+  data.pitch = 511;
+  data.roll = 511;
+  data.aux1 = 0;
+  data.aux2 = 0;
+  data.aux3 = 0;
+  data.aux4 = 0;
+  data.aux5 = 0;
+  
+  //setPPMValuesFromData();
+}
 
 //************************************************************************************************************************************************************************
 //************************************************************************************************************************************************************************
 //************************************************************************************************************************************************************************
-uint32_t process_Bayang()
+uint32_t process_Bayang(const void* _data)
 {
   uint32_t timeout = micros() + BAYANG_PACKET_PERIOD;
-  
-  Bayang_receive_packet();
+  MyDataBg* data=(MyDataBg *) _data;
+  Bayang_receive_packet(data);
   
   return timeout;
 }
@@ -108,7 +160,7 @@ void Bayang_bind()
   uint8_t bind_packet[BAYANG_PACKET_SIZE] = {0};
   uint32_t timeout;
   
-  digitalWrite(PIN_LED, LOW);
+  //digitalWrite(PIN_LED, LOW);
   
   NRF24L01_WriteReg(NRF24L01_05_RF_CH, BAYANG_RF_BIND_CHANNEL);
   
@@ -119,10 +171,10 @@ void Bayang_bind()
     while (millis() < timeout)
     {
       delay(1);
-      
+      //Serial.println(NRF24L01_ReadReg(NRF24L01_07_STATUS),  HEX);
       // data received from tx
       if (NRF24L01_ReadReg(NRF24L01_07_STATUS) & _BV(NRF24L01_07_RX_DR))
-      {
+      {//Serial.println("hhh");
         XN297_ReadPayload(packet, BAYANG_PACKET_SIZE);
         NRF24L01_WriteReg(NRF24L01_07_STATUS, 0x70); // Clear data ready, data sent, and retransmit
         NRF24L01_FlushRx();
@@ -157,16 +209,18 @@ void Bayang_bind()
   NRF24L01_WriteReg(NRF24L01_07_STATUS, 0x70);
   NRF24L01_FlushRx();
   
-  digitalWrite(PIN_LED, HIGH);
+  //digitalWrite(PIN_LED, HIGH);
 }
 
 //************************************************************************************************************************************************************************
 //************************************************************************************************************************************************************************
 //************************************************************************************************************************************************************************
-void Bayang_receive_packet()
+void Bayang_receive_packet(const void* _data)
 {
   static bool is_bound = false;
   static uint16_t failsafe_counter = 0;
+  MyDataBg* data=(MyDataBg *) _data;
+  data->throttle = data->yaw = data->pitch = data->roll = 0;
   
   // data received from tx
   if (NRF24L01_ReadReg(NRF24L01_07_STATUS) & _BV(NRF24L01_07_RX_DR))
@@ -182,7 +236,7 @@ void Bayang_receive_packet()
     
     if (packet[0] == 0xA4) // 0xA4, 0xA3 telemetry
     {
-      Serial.println("bind packet");
+      //Serial.println("bind packet");
     }
     else if (packet[0] == 0xA5) // 0xA5
     {
@@ -200,40 +254,41 @@ void Bayang_receive_packet()
         headless = (packet[2]  & 0x02);
         invert   = (packet[3]  & 0x80);
         
-        aileron  = (packet[4]  & 0x0003) * 256 + packet[5];
-        elevator = (packet[6]  & 0x0003) * 256 + packet[7];
-        throttle = (packet[8]  & 0x0003) * 256 + packet[9];
-        rudder   = (packet[10] & 0x0003) * 256 + packet[11];
+        data->roll = aileron  = (packet[4]  & 0x0003) * 256 + packet[5];
+        data->throttle = elevator = (packet[6]  & 0x0003) * 256 + packet[7];
+        data->pitch = throttle = (packet[8]  & 0x0003) * 256 + packet[9];
+        data->yaw = rudder   = (packet[10] & 0x0003) * 256 + packet[11];
         
-        //Serial.println(aileron,  DEC);
-        //Serial.println(elevator, DEC);
-        //Serial.println(throttle, DEC);
-        //Serial.println(rudder,   DEC);
-        //Serial.println(flip,     DEC);
-        //Serial.println(rth,      DEC);
-        //Serial.println(headless, DEC);
-        //Serial.println(invert,   DEC);
+        /*Serial.println("aileron ");
+        Serial.println(aileron,  DEC);
+        Serial.println(elevator, DEC);
+        Serial.println(throttle, DEC);
+        Serial.println(rudder,   DEC);
+        Serial.println(flip,     DEC);
+        Serial.println(rth,      DEC);
+        Serial.println(headless, DEC);
+        Serial.println(invert,   DEC);*/
         
         int value_servo1 = 0, value_servo2 = 0, value_servo3 = 0, value_servo4 = 0;
         
-        value_servo1 = map(aileron,  0, 1023, 1000, 2000);
-        value_servo2 = map(elevator, 0, 1023, 1000, 2000);
-        value_servo3 = map(throttle, 0, 1023, 1000, 2000);
-        value_servo4 = map(rudder,   0, 1023, 1000, 2000);
+        //value_servo1 = map(aileron,  0, 1023, 1000, 2000);
+        //value_servo2 = map(elevator, 0, 1023, 1000, 2000);
+        //value_servo3 = map(throttle, 0, 1023, 1000, 2000);
+        //value_servo4 = map(rudder,   0, 1023, 1000, 2000);
         
-        servo1.writeMicroseconds(value_servo1);
-        servo2.writeMicroseconds(value_servo2);
-        servo3.writeMicroseconds(value_servo3);
-        servo4.writeMicroseconds(value_servo4);
+        //servo1.writeMicroseconds(value_servo1);
+        //servo2.writeMicroseconds(value_servo2);
+        //servo3.writeMicroseconds(value_servo3);
+        //servo4.writeMicroseconds(value_servo4);
         
-        digitalWrite(PIN_OUT_FLIP, flip);
-        digitalWrite(PIN_OUT_RTH, rth);
-        digitalWrite(PIN_OUT_HEADLESS, headless);
-        digitalWrite(PIN_OUT_INVERT, invert);
+        //digitalWrite(PIN_OUT_FLIP, flip);
+        //digitalWrite(PIN_OUT_RTH, rth);
+        //digitalWrite(PIN_OUT_HEADLESS, headless);
+        //digitalWrite(PIN_OUT_INVERT, invert);
       }
       else
       {
-        Serial.println("checksum FAIL");
+        //Serial.println("checksum FAIL");
       }
       NRF24L01_WriteReg(NRF24L01_05_RF_CH, Bayang_rf_channels[Bayang_rf_chan++]);
       Bayang_rf_chan %= sizeof(Bayang_rf_channels);
@@ -242,8 +297,8 @@ void Bayang_receive_packet()
     }
     else
     {
-      Serial.print("Unrecognized packet: ");
-      Serial.println(packet[0], HEX);
+      //Serial.print("Unrecognized packet: ");
+      //Serial.println(packet[0], HEX);
     }
   }
   else if (is_bound)
@@ -256,15 +311,15 @@ void Bayang_receive_packet()
       failsafe_counter = 0;
       
       // neutral servo position
-      servo1.writeMicroseconds(1500);
-      servo2.writeMicroseconds(1500);
-      servo3.writeMicroseconds(1500);
-      servo4.writeMicroseconds(1500);
+      //servo1.writeMicroseconds(1500);
+      //servo2.writeMicroseconds(1500);
+      //servo3.writeMicroseconds(1500);
+      //servo4.writeMicroseconds(1500);
       
       // enable rebinding:
       extern bool reset;
       reset = true;
-      Serial.println("reset");
+      //Serial.println("reset");
     }
   }
 }
